@@ -1,0 +1,23 @@
+[project]
+name = "devpilot-agent"
+version = "0.1.0"
+description = "AI-powered engineering intelligence agent"
+requires-python = ">=3.11"
+dependencies = [
+    "groq>=1.7.0",
+    "pydantic>=2.13.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = "."

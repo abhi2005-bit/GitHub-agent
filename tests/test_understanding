@@ -1,0 +1,18 @@
+from app.agent.understander import Understander
+from app.llm.groq_client import GroqClient
+
+
+def test_understander_with_groq():
+    llm = GroqClient()
+
+    understander = Understander(llm)
+
+    result = understander.understand(
+        "Check project 12 health and tell me if there are any serious issues."
+    )
+
+    print(result.model_dump_json(indent=2))
+
+    assert result.project_id == 12
+    assert result.intent == UnderstandingIntent.INVESTIGATE_HEALTH
+    assert result.desired_outcome
