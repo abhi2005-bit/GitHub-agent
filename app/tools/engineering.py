@@ -2,35 +2,49 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.project_context import ProjectContext
 from app.models.tool import ToolResult
 
 
 class ProjectContextTool:
     """
-    Provides the current engineering context for a project.
+    Retrieves metadata for a project registered with DevPilot.
     """
 
     name = "get_project_context"
 
     description = (
-        "Retrieves the current engineering context for a project, "
-        "including health, issues, CI/CD, GitHub activity, and signals."
+        "Retrieves registered project metadata, including its ID, name, "
+        "source, repository, owner, and branch."
     )
 
     requires_approval = False
 
-    async def execute(self, **kwargs: Any) -> ToolResult:
-        project_id = kwargs.get("project_id")
+    def __init__(self, project_context: ProjectContext) -> None:
+        self.project_context = project_context
 
-        if project_id is None:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        """
+        Retrieve project metadata using the supplied project ID.
+        """
+
+        raw_project_id = kwargs.get("project_id")
+
+        # Validate that a project ID was provided.
+        if raw_project_id is None:
             return ToolResult(
                 success=False,
                 data=None,
                 error="project_id is required.",
             )
 
+        # Validate the project ID.
         try:
-            project_id = int(project_id)
+            if isinstance(raw_project_id, bool):
+                raise ValueError
+
+            project_id = int(raw_project_id)
+
         except (TypeError, ValueError):
             return ToolResult(
                 success=False,
@@ -38,42 +52,27 @@ class ProjectContextTool:
                 error="project_id must be a valid integer.",
             )
 
+        # Retrieve the registered project.
+        try:
+            project = self.project_context.get_project(project_id)
+
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                data=None,
+                error=str(exc),
+            )
+
+        # Build the context from actual project metadata.
         context = {
             "project": {
-                "id": project_id,
-                "name": "Demo Engineering Project",
-            },
-            "health": {
-                "score": 68,
-                "status": "warning",
-            },
-            "issues": {
-                "total": 18,
-                "open": 11,
-                "critical": 2,
-                "stale": 3,
-            },
-            "cicd": {
-                "total_runs": 20,
-                "failed_runs": 6,
-                "success_rate": 70.0,
-            },
-            "github": {
-                "commits": 32,
-                "open_pull_requests": 4,
-            },
-            "signals": [
-                {
-                    "type": "risk",
-                    "title": "CI reliability declining",
-                    "severity": "high",
-                },
-                {
-                    "type": "warning",
-                    "title": "Several issues are stale",
-                    "severity": "medium",
-                },
-            ],
+                "id": project.id,
+                "name": project.name,
+                "source": project.source.value,
+                "repository": project.repository,
+                "owner": project.owner,
+                "branch": project.branch,
+            }
         }
 
         return ToolResult(
@@ -81,6 +80,3 @@ class ProjectContextTool:
             data=context,
             error=None,
         )
-
-
-project_context_tool = ProjectContextTool()

@@ -6,6 +6,7 @@ from app.agent.planner import Planner
 from app.agent.understander import Understander
 from app.core.executor import Executor
 from app.core.policy import PolicyEngine
+from app.core.project_context import ProjectContext
 from app.models.agent import AgentMessage, AgentRun, AgentState
 
 
@@ -20,16 +21,31 @@ class AgentRunner:
         planner: Planner,
         policy_engine: PolicyEngine,
         executor: Executor,
+        project_context: ProjectContext,
     ) -> None:
         self.understander = understander
         self.planner = planner
         self.policy_engine = policy_engine
         self.executor = executor
+        self.project_context = project_context
 
-    async def run(self, goal: str) -> AgentRun:
-        run = AgentRun(goal=goal)
+    async def run(
+        self,
+        goal: str,
+        project_id: int | None = None,
+    ) -> AgentRun:
+        run = AgentRun(
+            goal=goal,
+            project_id=project_id,
+        )
 
         try:
+            # Resolve the selected project, if one was supplied.
+            project = None
+
+            if project_id is not None:
+                project = self.project_context.get_project(project_id)
+
             # Agent starts thinking.
             self._update_state(run, AgentState.THINKING)
 
@@ -55,13 +71,16 @@ class AgentRunner:
                     role="agent",
                     content=(
                         f"Goal understood as: "
-                        f"{understanding.intent}."
+                        f"{understanding.intent.value}."
                     ),
                 )
             )
 
-            # Create the plan from the structured understanding.
-            plan = self.planner.create_plan(understanding)
+            # Create the plan using both the understanding and project.
+            plan = self.planner.create_plan(
+                understanding=understanding,
+                project=project,
+            )
 
             run.messages.append(
                 AgentMessage(
@@ -82,7 +101,7 @@ class AgentRunner:
                     AgentMessage(
                         role="system",
                         content=(
-                            f"Agent execution blocked by policy: "
+                            "Agent execution blocked by policy: "
                             f"{policy_decision.reason}"
                         ),
                     )

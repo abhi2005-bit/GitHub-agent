@@ -51,6 +51,7 @@ class AgentRun(BaseModel):
         min_length=1,
         max_length=1000
     )
+    project_id: int | None = None
 
     state: AgentState = AgentState.IDLE
 
