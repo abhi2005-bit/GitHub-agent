@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from app.agent.planner import Planner
@@ -40,7 +41,7 @@ class AgentRunner:
         )
 
         try:
-            # Resolve the selected project, if one was supplied.
+            # Resolve the selected project, if provided.
             project = None
 
             if project_id is not None:
@@ -69,14 +70,11 @@ class AgentRunner:
             run.messages.append(
                 AgentMessage(
                     role="agent",
-                    content=(
-                        f"Goal understood as: "
-                        f"{understanding.intent.value}."
-                    ),
+                    content=f"Goal understood as: {understanding.intent.value}.",
                 )
             )
 
-            # Create the plan using both the understanding and project.
+            # Create a plan using the understanding and selected project.
             plan = self.planner.create_plan(
                 understanding=understanding,
                 project=project,
@@ -94,7 +92,6 @@ class AgentRunner:
 
             if not policy_decision.allowed:
                 self._update_state(run, AgentState.FAILED)
-
                 run.error = policy_decision.reason
 
                 run.messages.append(
@@ -115,8 +112,36 @@ class AgentRunner:
             # Execute the plan.
             result = await self.executor.execute(plan)
 
+            # Record the results returned by each executed tool.
+            for step_result in result.step_results:
+                if step_result.tool_result is None:
+                    continue
+
+                tool_result_data = {
+                    "success": step_result.tool_result.success,
+                    "data": step_result.tool_result.data,
+                    "error": step_result.tool_result.error,
+                }
+
+                formatted_result = json.dumps(
+                    tool_result_data,
+                    indent=2,
+                    default=str,
+                )
+
+                run.messages.append(
+                    AgentMessage(
+                        role="agent",
+                        content=(
+                            f"Tool result for step {step_result.step_id}:\n"
+                            f"{formatted_result}"
+                        ),
+                    )
+                )
+
             run.iterations += 1
 
+            # Update the final agent state.
             if result.success:
                 self._update_state(run, AgentState.COMPLETED)
 
@@ -129,7 +154,6 @@ class AgentRunner:
 
             else:
                 self._update_state(run, AgentState.FAILED)
-
                 run.error = result.error
 
                 run.messages.append(
@@ -141,7 +165,6 @@ class AgentRunner:
 
         except Exception as exc:
             self._update_state(run, AgentState.FAILED)
-
             run.error = str(exc)
 
             run.messages.append(

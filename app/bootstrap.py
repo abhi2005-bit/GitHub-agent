@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.agent.planner import Planner
 from app.agent.understander import Understander
 from app.core.executor import Executor
@@ -9,27 +11,32 @@ from app.repositories.project_repository import ProjectRepository
 from app.tools.engineering import ProjectContextTool
 from app.tools.registry import ToolRegistry
 
-def create_agent_runner()-> AgentRunner:
+
+def create_agent_runner(
+    project_repository: ProjectRepository,
+) -> AgentRunner:
     """
-    Create an AgentRunner instance with all required dependencies.
+    Assemble and return a configured DevPilot AgentRunner.
     """
 
-    # Initialize the project repository and context.
-    project_repository = ProjectRepository()
+    # Create one shared project context.
     project_context = ProjectContext(project_repository)
 
-    # Initialize the tool registry and register tools.
+    # Register the project context tool.
     tool_registry = ToolRegistry()
-    tool_registry.register(ProjectContextTool(project_context))
+    project_context_tool = ProjectContextTool(project_context)
+    tool_registry.register(project_context_tool)
 
-    # Initialize the LLM client, understander, planner, policy engine, and executor.
+    # Configure the LLM and Understander.
     llm_client = GroqClient()
     understander = Understander(llm_client)
+
+    # Configure planning, policy, and execution.
     planner = Planner(tool_registry)
     policy_engine = PolicyEngine()
     executor = Executor(tool_registry)
 
-    # Create and return the AgentRunner instance.
+    # Assemble the agent.
     return AgentRunner(
         understander=understander,
         planner=planner,
