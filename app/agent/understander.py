@@ -8,18 +8,13 @@ from app.models.understanding import Understanding
 
 class Understander:
     """
-    Converts a user's engineering request into structured Understanding
-    using an LLM.
+    Converts a user's engineering request into structured data.
     """
 
     def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
 
     def understand(self, goal: str) -> Understanding:
-        """
-        Interpret the user's goal and validate the resulting structure.
-        """
-
         if not goal or not goal.strip():
             raise ValueError("Goal cannot be empty.")
 
@@ -37,20 +32,13 @@ class Understander:
 
     @staticmethod
     def _build_prompt(goal: str) -> str:
-        """
-        Build the prompt used to understand the user's request.
-        """
-
         return f"""
 You are the understanding component of DevPilot,
 an engineering intelligence agent.
 
-Your job is to interpret the user's engineering request
-and convert it into structured JSON.
-
-Do not create an execution plan.
-Do not execute any tools.
-Do not invent information that is not present in the request.
+Interpret the user's engineering request.
+Do not create an execution plan or execute tools.
+Do not invent information.
 
 Return ONLY valid JSON with exactly these fields:
 
@@ -62,28 +50,38 @@ Return ONLY valid JSON with exactly these fields:
     "desired_outcome": "string"
 }}
 
+Supported intents are:
+
+- inspect_project
+- investigate_health
+- manage_issue
+- investigate_ci
+- read_repository_file
+- unknown
+
 Rules:
 
-- intent MUST be exactly one of:
-  "inspect_project",
-  "investigate_health",
-  "manage_issue",
-  "investigate_ci",
-  "unknown".
+1. If the user explicitly requests reading, opening, or showing
+   the contents of a specific repository file, use the intent
+   "read_repository_file".
 
-- project_id: numeric project ID if explicitly provided
-  in the user's request; otherwise null.
+2. For file-reading requests, store the exact repository-relative
+   file path in entities under the key "path".
+   Example: {{"path": "app/main.py"}}
 
-- entities: important named entities from the request,
-  represented as a dictionary of string keys and values.
+3. Do not invent a file path if the user did not provide one.
 
-- constraints: explicit requirements or limitations,
-  represented as a dictionary of string keys and values.
+4. For other requests, select the best matching supported intent.
 
-- desired_outcome: describe what the user wants to achieve.
+5. project_id must be a numeric ID if explicitly specified,
+   otherwise null.
 
-- Do not return Markdown or code fences.
-- Return valid JSON only.
+6. entities and constraints must be dictionaries with string
+   keys and string values.
+
+7. desired_outcome must describe what the user wants to achieve.
+
+8. Return valid JSON only. Do not use Markdown or code fences.
 
 User request:
 {goal}

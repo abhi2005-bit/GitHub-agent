@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from app.models.plan import ActionType, AgentPlan, AgentStep
 from app.models.project import Project
-from app.models.understanding import Understanding
+from app.models.understanding import Understanding, UnderstandingIntent
 from app.tools.registry import ToolRegistry
 
 
 class Planner:
     """
-    Deterministic planner for the DevPilot agent.
-
-    Creates an execution plan using the user's understanding
-    and the selected project.
+    Creates deterministic execution plans for DevPilot.
     """
 
     def __init__(self, tool_registry: ToolRegistry) -> None:
@@ -23,22 +20,37 @@ class Planner:
         project: Project | None = None,
     ) -> AgentPlan:
         """
-        Create an execution plan from a structured understanding
-        and an optional selected project.
+        Create a plan based on the user's intent and selected project.
         """
 
-        if understanding.intent in (
-            "inspect_project",
-            "investigate_health",
-            "manage_issue",
-            "investigate_ci",
-        ):
+        project_intents = {
+            UnderstandingIntent.INSPECT_PROJECT,
+            UnderstandingIntent.INVESTIGATE_HEALTH,
+            UnderstandingIntent.MANAGE_ISSUE,
+            UnderstandingIntent.INVESTIGATE_CI,
+        }
+
+        if understanding.intent in project_intents:
             if project is None:
                 raise ValueError(
                     "A project must be selected for this request."
                 )
 
             return self._create_project_context_plan(
+                understanding=understanding,
+                project=project,
+            )
+
+        if (
+            understanding.intent
+            == UnderstandingIntent.READ_REPOSITORY_FILE
+        ):
+            if project is None:
+                raise ValueError(
+                    "A project must be selected to read a repository file."
+                )
+
+            return self._create_file_read_plan(
                 understanding=understanding,
                 project=project,
             )
@@ -53,15 +65,9 @@ class Planner:
         understanding: Understanding,
         project: Project,
     ) -> AgentPlan:
-        """
-        Create a plan for gathering engineering context
-        from the selected project.
-        """
+        """Create a plan to retrieve project context."""
 
         tool_name = "get_project_context"
-
-        # Use the selected project's ID as the source of truth.
-        project_id = project.id
 
         if not self.tool_registry.has(tool_name):
             raise ValueError(
@@ -77,11 +83,11 @@ class Planner:
                     id="step_1",
                     action=ActionType.OBSERVE,
                     description=(
-                        "Gather engineering context for the selected project."
+                        "Retrieve project metadata and repository context."
                     ),
                     tool_name=tool.name,
                     tool_input={
-                        "project_id": project_id,
+                        "project_id": project.id,
                     },
                     requires_approval=tool.requires_approval,
                 ),
@@ -89,11 +95,50 @@ class Planner:
                     id="step_2",
                     action=ActionType.ANALYZE,
                     description=(
-                        "Analyze the collected project context and identify "
-                        "relevant engineering signals."
+                        "Analyze the collected project context."
                     ),
                     tool_name=None,
                     requires_approval=False,
                 ),
+            ],
+        )
+
+    def _create_file_read_plan(
+        self,
+        understanding: Understanding,
+        project: Project,
+    ) -> AgentPlan:
+        """Create a plan to read a specific repository file."""
+
+        path = understanding.entities.get("path")
+
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(
+                "A repository-relative file path is required."
+            )
+
+        tool_name = "read_repository_file"
+
+        if not self.tool_registry.has(tool_name):
+            raise ValueError(
+                f"Required tool '{tool_name}' is not registered."
+            )
+
+        tool = self.tool_registry.get(tool_name)
+
+        return AgentPlan(
+            goal=understanding.desired_outcome,
+            steps=[
+                AgentStep(
+                    id="step_1",
+                    action=ActionType.OBSERVE,
+                    description=f"Read repository file: {path.strip()}",
+                    tool_name=tool.name,
+                    tool_input={
+                        "project_id": project.id,
+                        "path": path.strip(),
+                    },
+                    requires_approval=tool.requires_approval,
+                )
             ],
         )

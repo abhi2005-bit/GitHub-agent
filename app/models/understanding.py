@@ -6,21 +6,17 @@ from pydantic import BaseModel, Field
 
 
 class UnderstandingIntent(str, Enum):
-    """
-    Supported intents that DevPilot can currently understand.
-    """
-
     INSPECT_PROJECT = "inspect_project"
     INVESTIGATE_HEALTH = "investigate_health"
     MANAGE_ISSUE = "manage_issue"
     INVESTIGATE_CI = "investigate_ci"
+    READ_REPOSITORY_FILE = "read_repository_file"
     UNKNOWN = "unknown"
 
 
 class Understanding(BaseModel):
     """
-    Structured representation of what the user wants
-    the agent to accomplish.
+    Structured representation of a user's engineering request.
     """
 
     intent: UnderstandingIntent
