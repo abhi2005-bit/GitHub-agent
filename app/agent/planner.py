@@ -110,13 +110,41 @@ class Planner:
     ) -> AgentPlan:
         """Create a plan to read a specific repository file."""
 
-        path = understanding.entities.get("path")
+        paths = understanding.file_paths.copy()
 
-        if not isinstance(path, str) or not path.strip():
+        if not paths:
+            path = understanding.entities.get("path")
+            if isinstance(path,str) and path.strip():
+                paths=[path]
+
+        if not paths:
             raise ValueError(
-                "A repository-relative file path is required."
+                "At least one repository-relative file path is required."
             )
 
+        #validating paths and remove duplicates while preserving order
+        unique_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for path in paths:
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError(
+                    f"Invalid file path: '{path}'. Must be a non-empty string."
+                )
+            path = path.strip().replace("\\", "/")
+
+            if(
+                path.startswith("/")
+                or (len(path) >= 2 and path[1] == ":")
+                or ".." in path.split("/")
+            ):
+                
+                raise ValueError(
+                    f"Invalid file path: '{path}'. Must be a repository-relative path."
+                )
+            if path not in seen_paths:
+                unique_paths.append(path)
+                seen_paths.add(path)
+            
         tool_name = "read_repository_file"
 
         if not self.tool_registry.has(tool_name):
@@ -126,19 +154,25 @@ class Planner:
 
         tool = self.tool_registry.get(tool_name)
 
-        return AgentPlan(
-            goal=understanding.desired_outcome,
-            steps=[
+        #create one execution step for each file
+        steps: list[AgentStep] = []
+
+        for index, path in enumerate(unique_paths, start=1):
+            steps.append(
                 AgentStep(
-                    id="step_1",
+                    id=f"read_file_{index}",
                     action=ActionType.OBSERVE,
-                    description=f"Read repository file: {path.strip()}",
+                    description=f"Read repository file: {path}",
                     tool_name=tool.name,
                     tool_input={
                         "project_id": project.id,
-                        "path": path.strip(),
+                        "path": path,
                     },
                     requires_approval=tool.requires_approval,
                 )
-            ],
+            )
+
+        return AgentPlan(
+            goal=understanding.desired_outcome,
+            steps=steps,
         )

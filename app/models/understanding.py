@@ -20,7 +20,14 @@ class Understanding(BaseModel):
     """
 
     intent: UnderstandingIntent
+
     project_id: int | None = None
+
     entities: dict[str, str] = Field(default_factory=dict)
+
     constraints: dict[str, str] = Field(default_factory=dict)
+
     desired_outcome: str
+
+    # Repository-relative paths the agent needs to inspect.
+    file_paths: list[str] = Field(default_factory=list)
