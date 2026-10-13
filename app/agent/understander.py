@@ -126,6 +126,7 @@ Supported intents:
 - manage_issue
 - investigate_ci
 - read_repository_file
+- review_code
 - unknown
 
 Rules:
@@ -152,6 +153,13 @@ Rules:
 8. desired_outcome must describe the user's intended result.
 
 9. Return valid JSON only. Do not use Markdown code fences.
+
+10. Choose "review_code" when the user asks to review,
+    inspect for bugs, evaluate code quality, identify
+    potential issues, or recommend code improvements.
+    Preserve explicitly mentioned file paths in file_paths.
+    Do not choose "read_repository_file" when the primary
+    goal is code review.
 
 USER REQUEST:
 {goal}

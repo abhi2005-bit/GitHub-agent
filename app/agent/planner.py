@@ -41,13 +41,13 @@ class Planner:
                 project=project,
             )
 
-        if (
-            understanding.intent
-            == UnderstandingIntent.READ_REPOSITORY_FILE
-        ):
+        if understanding.intent in {
+            UnderstandingIntent.READ_REPOSITORY_FILE,
+            UnderstandingIntent.REVIEW_CODE,
+        }:
             if project is None:
                 raise ValueError(
-                    "A project must be selected to read a repository file."
+                    "A project must be selected for this request."
                 )
 
             return self._create_file_read_plan(
@@ -108,43 +108,50 @@ class Planner:
         understanding: Understanding,
         project: Project,
     ) -> AgentPlan:
-        """Create a plan to read a specific repository file."""
+        """Create a plan to read one or more repository files."""
 
+        # Prefer the explicitly extracted file paths.
         paths = understanding.file_paths.copy()
 
+        # Support older single-file requests.
         if not paths:
             path = understanding.entities.get("path")
-            if isinstance(path,str) and path.strip():
-                paths=[path]
+
+            if isinstance(path, str) and path.strip():
+                paths = [path]
 
         if not paths:
             raise ValueError(
                 "At least one repository-relative file path is required."
             )
 
-        #validating paths and remove duplicates while preserving order
+        # Validate paths and remove duplicates while preserving order.
         unique_paths: list[str] = []
         seen_paths: set[str] = set()
+
         for path in paths:
             if not isinstance(path, str) or not path.strip():
                 raise ValueError(
-                    f"Invalid file path: '{path}'. Must be a non-empty string."
+                    f"Invalid file path: '{path}'. "
+                    "Must be a non-empty string."
                 )
+
             path = path.strip().replace("\\", "/")
 
-            if(
+            if (
                 path.startswith("/")
                 or (len(path) >= 2 and path[1] == ":")
                 or ".." in path.split("/")
             ):
-                
                 raise ValueError(
-                    f"Invalid file path: '{path}'. Must be a repository-relative path."
+                    f"Invalid file path: '{path}'. "
+                    "Must be a repository-relative path."
                 )
+
             if path not in seen_paths:
                 unique_paths.append(path)
                 seen_paths.add(path)
-            
+
         tool_name = "read_repository_file"
 
         if not self.tool_registry.has(tool_name):
@@ -154,7 +161,7 @@ class Planner:
 
         tool = self.tool_registry.get(tool_name)
 
-        #create one execution step for each file
+        # Create one execution step for each file.
         steps: list[AgentStep] = []
 
         for index, path in enumerate(unique_paths, start=1):

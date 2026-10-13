@@ -11,6 +11,7 @@ class UnderstandingIntent(str, Enum):
     MANAGE_ISSUE = "manage_issue"
     INVESTIGATE_CI = "investigate_ci"
     READ_REPOSITORY_FILE = "read_repository_file"
+    REVIEW_CODE = "review_code"
     UNKNOWN = "unknown"
 
 
