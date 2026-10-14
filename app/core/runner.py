@@ -145,6 +145,7 @@ class AgentRunner:
             report = self.analyzer.analyze(
                 goal=run.goal,
                 execution_result=result,
+                intent=understanding.intent,
             )
 
             run.messages.append(
