@@ -11,6 +11,7 @@ class Executor:
 
     async def execute(self, plan: AgentPlan) -> ExecutionResult:
         step_results: list[StepExecutionResult] = []
+        errors: list[str] = []
 
         for step in plan.steps:
 
@@ -20,11 +21,12 @@ class Executor:
                 step_results.append(
                     StepExecutionResult(
                         step_id=step.id,
-                        success=True,
+                        success=False,
                         tool_result=None,
                         error="Step skipped because no tool is configured.",
                     )
                 )
+                errors.append(f"Step '{step.id}' has no configured tool.")
                 continue
 
             # Find the required tool in the registry.
@@ -41,11 +43,8 @@ class Executor:
                     )
                 )
 
-                return ExecutionResult(
-                    success=False,
-                    step_results=step_results,
-                    error=str(exc),
-                )
+                errors.append(str(exc))
+                continue
 
             # Execute the tool.
             try:
@@ -67,11 +66,8 @@ class Executor:
                     )
                 )
 
-                return ExecutionResult(
-                    success=False,
-                    step_results=step_results,
-                    error=error_message,
-                )
+                errors.append(error_message)
+                continue
 
             # Store the tool result.
             step_results.append(
@@ -85,15 +81,13 @@ class Executor:
 
             # Stop execution if the tool itself reports failure.
             if not tool_result.success:
-                return ExecutionResult(
-                    success=False,
-                    step_results=step_results,
-                    error=tool_result.error,
+                errors.append(
+                    tool_result.error or f"Tool '{step.tool_name}' failed."
                 )
 
-        # Every executable step completed successfully.
+        # Preserve every step outcome and aggregate independent failures.
         return ExecutionResult(
-            success=True,
+            success=not errors,
             step_results=step_results,
-            error=None,
+            error="; ".join(errors) if errors else None,
         )

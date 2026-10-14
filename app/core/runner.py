@@ -124,6 +124,22 @@ class AgentRunner:
                     "error": step_result.tool_result.error,
                 }
 
+                if (
+                    understanding.intent.value == "review_code"
+                    and isinstance(tool_result_data.get("data"), dict)
+                    and isinstance(tool_result_data["data"].get("content"), str)
+                ):
+                    file_data = tool_result_data["data"]
+                    message_content = (
+                        f"File retrieved for review: {file_data.get('path', 'unknown path')} "
+                        f"({len(file_data['content'])} characters). Source is retained "
+                        "as analyzer evidence and omitted from the conversation transcript."
+                    )
+                    run.messages.append(
+                        AgentMessage(role="agent", content=message_content)
+                    )
+                    continue
+
                 formatted_result = json.dumps(
                     tool_result_data,
                     indent=2,

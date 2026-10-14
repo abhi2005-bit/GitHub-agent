@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ActionType(str, Enum):
@@ -49,3 +49,10 @@ class AgentPlan(BaseModel):
     steps: list[AgentStep] = Field(
         min_length=1,
     )
+
+    @model_validator(mode="after")
+    def step_ids_are_unique(self) -> "AgentPlan":
+        ids = [step.id for step in self.steps]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Plan step IDs must be unique.")
+        return self

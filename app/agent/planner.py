@@ -23,14 +23,14 @@ class Planner:
         Create a plan based on the user's intent and selected project.
         """
 
-        project_intents = {
-            UnderstandingIntent.INSPECT_PROJECT,
-            UnderstandingIntent.INVESTIGATE_HEALTH,
-            UnderstandingIntent.MANAGE_ISSUE,
-            UnderstandingIntent.INVESTIGATE_CI,
+        project_tools = {
+            UnderstandingIntent.INSPECT_PROJECT: "get_project_context",
+            UnderstandingIntent.INVESTIGATE_HEALTH: "get_repository_health",
+            UnderstandingIntent.MANAGE_ISSUE: "search_open_issues",
+            UnderstandingIntent.INVESTIGATE_CI: "investigate_ci",
         }
 
-        if understanding.intent in project_intents:
+        if understanding.intent in project_tools:
             if project is None:
                 raise ValueError(
                     "A project must be selected for this request."
@@ -39,6 +39,7 @@ class Planner:
             return self._create_project_context_plan(
                 understanding=understanding,
                 project=project,
+                tool_name=project_tools[understanding.intent],
             )
 
         if understanding.intent in {
@@ -64,10 +65,9 @@ class Planner:
         self,
         understanding: Understanding,
         project: Project,
+        tool_name: str = "get_project_context",
     ) -> AgentPlan:
         """Create a plan to retrieve project context."""
-
-        tool_name = "get_project_context"
 
         if not self.tool_registry.has(tool_name):
             raise ValueError(
@@ -88,17 +88,14 @@ class Planner:
                     tool_name=tool.name,
                     tool_input={
                         "project_id": project.id,
+                        **(
+                            {"query": understanding.entities["issue_query"]}
+                            if tool_name == "search_open_issues"
+                            and understanding.entities.get("issue_query")
+                            else {}
+                        ),
                     },
                     requires_approval=tool.requires_approval,
-                ),
-                AgentStep(
-                    id="step_2",
-                    action=ActionType.ANALYZE,
-                    description=(
-                        "Analyze the collected project context."
-                    ),
-                    tool_name=None,
-                    requires_approval=False,
                 ),
             ],
         )
@@ -140,8 +137,10 @@ class Planner:
 
             if (
                 path.startswith("/")
+                or path.startswith("//")
                 or (len(path) >= 2 and path[1] == ":")
-                or ".." in path.split("/")
+                or "\x00" in path
+                or any(part in {"", ".", ".."} for part in path.split("/"))
             ):
                 raise ValueError(
                     f"Invalid file path: '{path}'. "

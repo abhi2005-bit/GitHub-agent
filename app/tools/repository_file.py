@@ -71,7 +71,18 @@ class ReadRepositoryFileTool:
                 error="A non-empty file path is required.",
             )
 
-        path = raw_path.strip()
+        path = raw_path.strip().replace("\\", "/")
+        if (
+            path.startswith("/")
+            or (len(path) >= 2 and path[1] == ":")
+            or "\x00" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            return ToolResult(
+                success=False,
+                data=None,
+                error="File path must be a valid repository-relative path.",
+            )
 
         # 3. Resolve the registered project.
         try:

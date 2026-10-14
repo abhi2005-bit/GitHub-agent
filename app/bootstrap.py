@@ -11,6 +11,11 @@ from app.integrations.github_client import GitHubClient
 from app.llm.groq_client import GroqClient
 from app.repositories.project_repository import ProjectRepository
 from app.tools.engineering import ProjectContextTool
+from app.tools.investigation import (
+    CIInvestigationTool,
+    OpenIssueSearchTool,
+    RepositoryHealthTool,
+)
 from app.tools.repository_file import ReadRepositoryFileTool
 from app.tools.registry import ToolRegistry
 
@@ -36,6 +41,13 @@ def create_agent_runner(
         github_client=github_client,
     )
     tool_registry.register(project_context_tool)
+
+    for tool in (
+        RepositoryHealthTool(project_context, github_client),
+        OpenIssueSearchTool(project_context, github_client),
+        CIInvestigationTool(project_context, github_client),
+    ):
+        tool_registry.register(tool)
 
     read_file_tool = ReadRepositoryFileTool(
         project_context=project_context,

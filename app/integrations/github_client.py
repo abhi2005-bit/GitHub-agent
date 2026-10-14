@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -18,8 +20,13 @@ class GitHubClient:
     TIMEOUT = 10.0
     MAX_TEXT_FILE_SIZE = 1_000_000
 
-    def __init__(self, base_url: str = BASE_URL) -> None:
+    def __init__(
+        self,
+        base_url: str = BASE_URL,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.transport = transport
 
     @staticmethod
     def _validate_repository_details(
@@ -34,7 +41,16 @@ class GitHubClient:
         if not isinstance(repository, str) or not repository.strip():
             raise ValueError("Repository name cannot be empty.")
 
-        return owner.strip(), repository.strip()
+        owner = owner.strip()
+        repository = repository.strip()
+        if (
+            re.search(r"\s|[/\\]", owner)
+            or re.search(r"\s|[/\\]", repository)
+            or owner in {".", ".."}
+            or repository in {".", ".."}
+        ):
+            raise ValueError("GitHub owner and repository must be single path segments.")
+        return owner, repository
 
     async def _get_json(
         self,
@@ -48,11 +64,15 @@ class GitHubClient:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": self.API_VERSION,
         }
+        token = os.getenv("GITHUB_TOKEN")
+        if token and token.strip():
+            headers["Authorization"] = f"Bearer {token}"
 
         try:
             async with httpx.AsyncClient(
                 timeout=self.TIMEOUT,
                 headers=headers,
+                transport=self.transport,
             ) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
@@ -79,6 +99,8 @@ class GitHubClient:
                     )
             elif status_code == 401:
                 message = "GitHub authentication failed."
+            elif status_code == 429:
+                message = "GitHub API rate limit exceeded."
             else:
                 message = (
                     f"GitHub API returned HTTP {status_code} "
@@ -111,7 +133,10 @@ class GitHubClient:
             repository,
         )
 
-        url = f"{self.base_url}/repos/{owner}/{repository}"
+        url = (
+            f"{self.base_url}/repos/{quote(owner, safe='')}"
+            f"/{quote(repository, safe='')}"
+        )
 
         data = await self._get_json(
             url=url,
@@ -145,7 +170,8 @@ class GitHubClient:
         encoded_branch = quote(branch, safe="")
 
         url = (
-            f"{self.base_url}/repos/{owner}/{repository}"
+            f"{self.base_url}/repos/{quote(owner, safe='')}"
+            f"/{quote(repository, safe='')}"
             f"/git/trees/{encoded_branch}"
         )
 
@@ -210,16 +236,25 @@ class GitHubClient:
         if not isinstance(branch, str) or not branch.strip():
             raise ValueError("Branch cannot be empty.")
 
-        path = path.strip().strip("/")
+        path = path.strip().replace("\\", "/")
         branch = branch.strip()
 
-        if not path or any(part in {".", ".."} for part in path.split("/")):
-            raise ValueError("File path is invalid.")
+        if (
+            not path
+            or path.startswith("/")
+            or (len(path) >= 2 and path[1] == ":")
+            or "\x00" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            raise ValueError(
+                "File path must be a valid repository-relative path."
+            )
 
         encoded_path = quote(path, safe="/")
 
         url = (
-            f"{self.base_url}/repos/{owner}/{repository}"
+            f"{self.base_url}/repos/{quote(owner, safe='')}"
+            f"/{quote(repository, safe='')}"
             f"/contents/{encoded_path}"
         )
 
@@ -292,3 +327,82 @@ class GitHubClient:
             )
 
         return decoded_text
+
+    async def get_repository_health(
+        self, owner: str, repository: str
+    ) -> dict[str, Any]:
+        """Return observable repository health signals from GitHub metadata."""
+        data = await self.get_repository(owner, repository)
+        fields = (
+            "full_name", "archived", "disabled", "private", "default_branch",
+            "open_issues_count", "pushed_at", "updated_at", "size",
+            "html_url",
+        )
+        return {field: data[field] for field in fields if field in data}
+
+    async def search_open_issues(
+        self,
+        owner: str,
+        repository: str,
+        query: str | None = None,
+        per_page: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search open issues using GitHub's read-only Issues search API."""
+        owner, repository = self._validate_repository_details(owner, repository)
+        per_page = min(max(int(per_page), 1), 100)
+        terms = [f"repo:{owner}/{repository}", "is:issue", "is:open"]
+        if query and query.strip():
+            terms.append(query.strip())
+        data = await self._get_json(
+            f"{self.base_url}/search/issues",
+            resource_description=f"Open issues for '{owner}/{repository}'",
+            params={"q": " ".join(terms), "per_page": str(per_page), "sort": "updated", "order": "desc"},
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            raise RuntimeError("GitHub returned an unexpected issue search response.")
+        if data.get("incomplete_results") is True:
+            raise RuntimeError("GitHub returned incomplete issue search results.")
+        fields = ("number", "title", "state", "html_url", "created_at", "updated_at", "labels", "body")
+        results = []
+        for item in data["items"]:
+            if not isinstance(item, dict) or "pull_request" in item:
+                continue
+            issue = {field: item[field] for field in fields if field in item}
+            body = issue.get("body")
+            if isinstance(body, str) and len(body) > 4_000:
+                issue["body"] = body[:4_000] + "\n[TRUNCATED]"
+                issue["body_truncated"] = True
+            results.append(issue)
+        return results
+
+    async def list_workflow_runs(
+        self,
+        owner: str,
+        repository: str,
+        branch: str,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return recent GitHub Actions workflow runs for a configured branch."""
+        owner, repository = self._validate_repository_details(owner, repository)
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError("Branch cannot be empty.")
+        per_page = min(max(int(per_page), 1), 100)
+        url = (
+            f"{self.base_url}/repos/{quote(owner, safe='')}"
+            f"/{quote(repository, safe='')}/actions/runs"
+        )
+        data = await self._get_json(
+            url,
+            resource_description=f"Actions runs for '{owner}/{repository}'",
+            params={"branch": branch.strip(), "per_page": str(per_page)},
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("workflow_runs"), list):
+            raise RuntimeError("GitHub returned an unexpected workflow runs response.")
+        fields = (
+            "id", "name", "display_title", "event", "status", "conclusion",
+            "html_url", "created_at", "updated_at", "head_branch", "head_sha",
+        )
+        return [
+            {field: run[field] for field in fields if field in run}
+            for run in data["workflow_runs"] if isinstance(run, dict)
+        ]

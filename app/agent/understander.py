@@ -68,6 +68,11 @@ class Understander:
         ):
             entities["path"] = file_paths[0]
 
+        if data.get("intent") == UnderstandingIntent.MANAGE_ISSUE.value:
+            issue_query = self._extract_issue_query(normalized_goal)
+            if issue_query:
+                entities["issue_query"] = issue_query
+
         return Understanding.model_validate(data)
 
     @classmethod
@@ -93,6 +98,19 @@ class Understander:
                 seen.add(path)
 
         return paths
+
+    @staticmethod
+    def _extract_issue_query(goal: str) -> str | None:
+        """Extract an explicit topic phrase without inventing search terms."""
+        match = re.search(
+            r"\b(?:about|regarding|related to|relating to)\s+(.+?)(?:[?.!]|$)",
+            goal,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        query = match.group(1).strip().strip("'\" `")
+        return query or None
 
     @staticmethod
     def _build_prompt(goal: str) -> str:

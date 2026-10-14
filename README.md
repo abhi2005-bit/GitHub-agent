@@ -1,164 +1,91 @@
 # DevPilot Agent
 
-**An LLM-powered engineering agent for understanding software development requests and retrieving real repository context.**
+DevPilot is a read-only, AI-assisted engineering agent. It interprets a request, creates a deterministic plan, checks policy, retrieves evidence from a registered GitHub repository, and reports what it can support from that evidence.
 
-DevPilot Agent is a modular AI agent built in Python that combines large language models, structured planning, policy-controlled execution, and GitHub integration. It is designed to evolve beyond a generic chatbot into an engineering-focused agent that can inspect repositories and assist developers with understanding their projects.
+## Current capabilities
 
-The project follows a modular architecture that separates reasoning, planning, policy enforcement, tool execution, and external integrations.
+- Inspect GitHub repository metadata and a recursive repository tree. Tree responses over 5,000 entries are marked and limited to the first 5,000 entries.
+- Read UTF-8 text files from the configured repository branch, up to 1 MB per file.
+- Review one or more explicitly named files. Python files are parsed with `ast` without execution. Review findings are structured and checked against retrieved paths, line ranges, and exact source excerpts. Invalid model findings are withheld with an explicit limitation.
+- Inspect basic GitHub repository health signals from repository metadata.
+- Search open GitHub issues, optionally using an explicitly stated topic.
+- List recent GitHub Actions runs for the configured branch.
+- Reject any plan containing a step marked as requiring approval. No write operations are currently registered.
 
-> **Status:** Work in progress. GitHub repository metadata retrieval and file-tree listing are implemented. Source-code analysis, persistent project storage, and broader engineering workflows are under development.
-
-## Features
-
-- **LLM-powered goal understanding:** Uses Groq to interpret natural-language engineering requests and produce structured understanding data.
-- **Structured project models:** Uses Pydantic to represent projects, agent plans, execution results, and tool responses.
-- **Deterministic planning:** Converts supported engineering intents into execution plans.
-- **Policy-controlled execution:** Evaluates plans before allowing the executor to run them.
-- **Modular tool system:** Uses a tool registry to make engineering capabilities available to the agent.
-- **GitHub REST API integration:** Retrieves live metadata for public repositories.
-- **Repository exploration:** Lists repository files and directories using GitHub's Git Trees API.
-- **Project context management:** Registers project metadata and resolves projects by their IDs.
-- **Asynchronous execution:** Uses Python's asynchronous programming features and HTTPX for API requests.
+Issue handling is read-only discovery and inspection. It does not create, edit, close, or comment on issues. CI investigation reports API run data; it does not fetch logs or rerun workflows.
 
 ## Architecture
 
-DevPilot Agent separates the reasoning layer from the execution and integration layers.
-
 ```text
-                        User Goal
-                            |
-                            v
-                       AgentRunner
-                            |
-                            v
-                        Understander
-                       (Groq LLM)
-                            |
-                            v
-                          Planner
-                    (Deterministic)
-                            |
-                            v
-                       PolicyEngine
-                            |
-                            v
-                         Executor
-                            |
-                            v
-                       ToolRegistry
-                            |
-                            v
-                    ProjectContextTool
-                            |
-                  +---------+----------+
-                  |                    |
-                  v                    v
-             ProjectContext       GitHubClient
-                  |                    |
-                  v                    v
-          ProjectRepository       GitHub REST API
+Request → Understander → Planner → PolicyEngine → Executor → GitHub tools
+               │                                         │
+               └──────────── intent and file paths ──────┘
+                                                         ↓
+                                               Analyzer → AgentRun
 ```
 
-### Core components
+`app/bootstrap.py` wires the components. `AgentRunner` owns lifecycle state and passes the detected intent to `Analyzer`. Tools use `GitHubClient`; registered projects are held in an in-memory `ProjectRepository` for the duration of one CLI session.
 
-| Component | Responsibility |
-|---|---|
-| `AgentRunner` | Coordinates the agent lifecycle and records messages, state, and execution results. |
-| `Understander` | Interprets the user's request using an LLM. |
-| `Planner` | Generates a structured plan for supported engineering intents. |
-| `PolicyEngine` | Evaluates plans against execution policies. |
-| `Executor` | Resolves registered tools and executes planned steps. |
-| `ToolRegistry` | Stores and retrieves available tool instances. |
-| `ProjectContext` | Resolves registered projects. |
-| `ProjectRepository` | Stores projects in memory. |
-| `ProjectService` | Validates and registers GitHub project metadata. |
-| `ProjectContextTool` | Combines local project metadata with live GitHub repository information and file listings. |
-| `GitHubClient` | Communicates with the GitHub REST API. |
-| `GroqClient` | Implements the provider-independent LLM client interface using Groq. |
-| `bootstrap.py` | Constructs components and injects their dependencies. |
+## Technology
 
-## Technology Stack
+- Python 3.11+
+- `uv` for environment and dependency management
+- Pydantic models, pytest, HTTPX, Groq API client, and python-dotenv
+- GitHub REST API for repository metadata, trees, files, issues, and Actions runs
 
-- **Language:** Python 3.11+
-- **Package and environment management:** uv
-- **LLM provider:** Groq
-- **Data validation:** Pydantic
-- **HTTP requests:** HTTPX
-- **Configuration:** python-dotenv
-- **Testing:** pytest, pytest-asyncio
-- **External integration:** GitHub REST API
+## Setup
 
-## Getting Started
+Install Python 3.11 and [uv](https://docs.astral.sh/uv/), then:
 
-### Prerequisites
-
-Install Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
-
-You will also need a Groq API key to run the LLM-powered agent.
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/abhi2005-bit/policy-agent.git
-cd policy-agent
-```
-
-### 2. Install dependencies
-
-```bash
+```powershell
 uv sync
 ```
 
-### 3. Configure environment variables
-
-Create a `.env` file in the project root:
+Create a `.env` file in the repository root or configure the variables in your shell:
 
 ```dotenv
 GROQ_API_KEY=your_groq_api_key
+# Optional. Public repository reads work without this token.
+GITHUB_TOKEN=your_github_token
 ```
 
-Replace the placeholder with your own key. Never commit `.env` or expose API keys in source code, prompts, logs, or public repositories.
+`GROQ_API_KEY` is needed for request understanding and analysis. `GITHUB_TOKEN` is optional and is sent only to GitHub API requests when set; use a token with the least access needed. Do not commit `.env` or paste credentials into requests. `.env` is ignored by Git.
 
-Ensure `.env` is included in `.gitignore`.
+## Register and run
 
-### 4. Run DevPilot Agent
+Start the CLI:
 
-```bash
+```powershell
 uv run python -m app.main
 ```
 
-The application prompts you to register a project using its name, GitHub owner, repository name, and branch. You can then enter a natural-language engineering request.
+Enter a project display name, GitHub owner, repository name, and branch. Registration stores these values in memory and does not verify the repository until a request calls GitHub. Then enter a request such as:
 
-For example:
+- `Show me the structure of this repository.`
+- `Read app/main.py.`
+- `Review app/main.py for bugs.`
+- `Review app/main.py and app/agent/planner.py for reliability issues.`
+- `Investigate the latest GitHub Actions failures.`
+- `Find open issues relating to authentication.`
 
-```text
-Project name: DevPilot Agent
-GitHub owner: abhi2005-bit
-Repository name: policy-agent
-Branch: main
+The Actions request inspects recent workflow runs on the branch entered during registration. Issue search is read-only. If the API response is unavailable, the agent reports the failure rather than claiming the data was inspected.
 
-What should DevPilot investigate?
-Inspect this project's metadata and list its files.
+## Tests
+
+Run the deterministic unit suite:
+
+```powershell
+uv run pytest
 ```
 
-The agent interprets the request, generates a plan, evaluates it against policy, executes the registered tool, and displays the resulting tool data.
+Tests use fake LLM responses and mocked GitHub transports; the suite does not require a Groq key or live GitHub access.
 
-## GitHub Integration
+## Security and limitations
 
-DevPilot uses the GitHub REST API to retrieve repository information.
-
-Currently implemented capabilities include:
-
-- Fetching repository metadata, including its full name, description, visibility, URL, default branch, and star count.
-- Retrieving a recursive repository tree containing file and directory paths.
-- Returning GitHub responses through structured tool results.
-
-Public repositories can be read without authentication, subject to GitHub's API rate limits. Authentication for private repositories is not yet implemented.
-
-Repository registration currently stores metadata in an in-memory repository. GitHub metadata and file listings are fetched from the remote API when the tool executes.
-
-### Current limitations
-
-- Project registrations are lost when the application restarts.
-- GitHub OAuth and private repository authentication are not implemented.
-- The agent can list repository paths but does not yet perform
+- Retrieved repository content is treated as untrusted evidence. It cannot authorize tool calls or override the agent's instructions.
+- DevPilot does not execute or modify repository code. It does not run tests, shell commands, or static security scanners.
+- Code review is bounded to 20,000 characters per retrieved source file for model analysis; reports identify truncation. AST parsing uses the original, unmodified Python source.
+- Findings are not proof of correctness or security. They are limited to the supplied source and model analysis. Invalid paths, locations, evidence, or schema output are not reported as validated findings.
+- Repository registrations are not persisted. Only GitHub-backed projects are supported by the current CLI tools.
+- Health signals are limited to GitHub repository metadata. CI details are limited to recent Actions run summaries, without logs or job-level analysis.
+- GitHub API permissions and rate limits may restrict access. Private repositories generally require a suitable `GITHUB_TOKEN`.

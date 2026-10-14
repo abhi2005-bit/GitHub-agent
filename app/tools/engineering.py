@@ -22,6 +22,7 @@ class ProjectContextTool:
     )
 
     requires_approval = False
+    MAX_TREE_ENTRIES = 5_000
 
     def __init__(
         self,
@@ -137,12 +138,14 @@ class ProjectContextTool:
             # 6. Include file paths without unnecessary API fields.
             context["repository_tree"] = {
                 "count": len(files),
+                "returned_count": min(len(files), self.MAX_TREE_ENTRIES),
+                "truncated": len(files) > self.MAX_TREE_ENTRIES,
                 "entries": [
                     {
                         "path": item["path"],
                         "type": item["type"],
                     }
-                    for item in files
+                    for item in files[: self.MAX_TREE_ENTRIES]
                 ],
             }
 
